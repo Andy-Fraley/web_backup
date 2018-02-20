@@ -125,7 +125,8 @@ def main(argv):
     os.chdir(g.args.website_directory + '/..')
     exec_zip_list = ['/usr/bin/zip', '-r', output_filename, website_name]
     message_info('Zipping website files directory')
-    exit_status = subprocess.call(exec_zip_list)
+    FNULL = open(os.devnull, 'w')
+    exit_status = subprocess.call(exec_zip_list, stdout=FNULL)
     if exit_status == 0:
         message_info('Successfully zipped web directory to ' + output_filename)
     else:
@@ -137,17 +138,16 @@ def main(argv):
         output_filename = g.temp_directory + '/database.sql'
         dict_db_info = get_wp_database_defines(wp_config_filename,
             ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST'])
-        print dict_db_info
         exec_mysqldump_list = ['/bin/mysqldump', '-h', dict_db_info['DB_HOST'], '-u', dict_db_info['DB_USER'],
-            '-p' + dict_db_info['DB_PASSWORD'], dict_db_info['DB_NAME'], '>', output_filename]
+            '-p' + dict_db_info['DB_PASSWORD'], dict_db_info['DB_NAME'], '-r', output_filename]
         message_info('Dumping WordPress MySQL database named ' + dict_db_info['DB_NAME'])
-        print exec_mysqldump_list
-        exit(1)
-        exit_status = subprocess.call(exec_mysqldump_list)
+        exit_status = subprocess.call(exec_mysqldump_list, stderr=FNULL)
         if exit_status == 0:
-            message_info('Successfully dumped MySQL database named ' + dict_db_info['DB_NAME'])
+            message_info('Successfully dumped MySQL database to ' + output_filename)
         else:
             message_warning('Error running mysqldump. Exit status ' + str(exit_status))
+
+    exit(1)
     
     # Push ZIP file into appropriate schedule folders (daily, weekly, monthly, etc.) and then delete excess
     # backups in each folder
@@ -184,9 +184,7 @@ def get_wp_database_defines(wp_config_filename, list_match_defines):
     with open(wp_config_filename) as wp_config_file:
         for line in wp_config_file:
             line = line.rstrip()  # remove '\n' at end of line
-            print line
             matched_define = re.search("define\('(?P<key>[A-Z_]+)',\s*'(?P<value>[a-zA-Z0-9_]+)'\)", line)
-            print matched_define
             if matched_define and matched_define.group('key') and matched_define.group('value'):
                 key = matched_define.group('key')
                 if key in list_match_defines:
