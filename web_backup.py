@@ -147,8 +147,29 @@ def main(argv):
         else:
             message_warning('Error running mysqldump. Exit status ' + str(exit_status))
 
-    exit(1)
-    
+    # Generate final results output zip filename
+    if g.args.output_filename is not None:
+        output_filename = g.args.output_filename
+    elif g.args.delete_zip:
+        # We're deleting it when we're done, so we don't care about its location/name. Grab temp filename
+        tmp_file = tempfile.NamedTemporaryFile(prefix='web_backup_', suffix='.zip', delete=False)
+        output_filename = tmp_file.name
+        tmp_file.close()
+        os.remove(output_filename)
+        message_info('Temp filename used for final results zip output: ' + output_filename)
+    else:
+        output_filename = './tmp/web_backup_' + datetime.datetime.now().strftime('%Y%m%d%H%M%S') + '.zip'
+
+    # Zip together results files to create final encrypted zip file
+    exec_zip_list = ['/usr/bin/zip', '-P', g.zip_file_password, '-j', '-r', output_filename, g.temp_directory + '/']
+    message_info('Zipping results files together')
+    print exec_zip_list
+    exit_status = subprocess.call(exec_zip_list, stdout=FNULL)
+    if exit_status == 0:
+        message_info('Successfully all results to temporary file ' + output_filename)
+    else:
+        message_warning('Error running zip. Exit status ' + str(exit_status))
+
     # Push ZIP file into appropriate schedule folders (daily, weekly, monthly, etc.) and then delete excess
     # backups in each folder
     list_completed_backups = []
@@ -169,12 +190,17 @@ def main(argv):
         if list_notification_emails is not None:
             send_email_notification(list_completed_backups, list_notification_emails)
 
-    # If user asked not to retain temp directory, don't delete it!
+    # If user asked not to retain temp directory, don't delete it!  Else, delete it
     if g.args.retain_temp_directory:
         message_info('Retained temporary output directory ' + g.temp_directory)
     else:
         shutil.rmtree(g.temp_directory)
         message_info('Temporary output directory deleted')
+
+    # If user requested generated zip file be deleted, delete it
+    if g.args.delete_zip:
+        os.remove(output_filename)
+        message_info('Output final results zip file deleted')
 
     util.sys_exit(0)
 
@@ -205,7 +231,6 @@ def upload_to_s3(website_name, folder_name, output_filename):
         region_name=g.aws_region_name)
     data = open(output_filename, 'rb')
     bucket = s3.Bucket(g.aws_s3_bucket_name)
-    print s3_key
     bucket.put_object(Key=s3_key, Body=data)
     message_info('Uploaded to S3: ' + s3_key)
     return s3_key
@@ -283,7 +308,7 @@ def get_backups_to_do(website_name):
                 else:
                     message_info('Unrecognized folder or file in web_backups S3 bucket...ignoring: ' + file_item.key)
             else:
-                message_info('Unrecognized folder or file in web_backups S3 bucket with long path...ignoring: ' +
+                message_info('Non-matching folder or file in web_backups S3 bucket with long path...ignoring: ' +
                     file_item.key)
         else:
             message_info('Found folder that is not part of this website backup area: ' +
