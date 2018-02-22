@@ -122,7 +122,8 @@ def main(argv):
 
     # Create ZIP file of website files
     output_filename = g.temp_directory + '/files.zip'
-    exec_zip_list = ['/usr/bin/zip', '-r', output_filename, g.args.website_directory + '/*']
+    os.chdir(g.args.website_directory)
+    exec_zip_list = ['/usr/bin/zip', '-r', output_filename, '.']
     message_info('Zipping website files directory')
     FNULL = open(os.devnull, 'w')
     exit_status = subprocess.call(exec_zip_list, stdout=FNULL)
