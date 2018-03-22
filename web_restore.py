@@ -115,6 +115,7 @@ def main(argv):
         zip_file_password = util.get_ini_setting('zip_file', 'password', False)
 
     temp_directory = tempfile.mkdtemp(prefix='web_restore_')
+    print 'temp_directory is ' + temp_directory
     exec_zip_list = ['/usr/bin/unzip', '-P', zip_file_password, backup_zip_filename, '-d', temp_directory]
     message_info('Unzipping backup file container into ' + temp_directory)
     FNULL = open(os.devnull, 'w')
@@ -164,9 +165,12 @@ def main(argv):
                 # Drop the database so we can do a clean (re)create
                 message_info('Droping existing database ' + db_name)
                 output_lines = subprocess.check_output(["/bin/mysql -u " + db_user + " -p" + db_password + \
-                    " -e 'drop database " + db_name  + ";' 2>/dev/null"], shell=True)
+                    " -e 'DROP DATABASE " + db_name  + ";' 2>/dev/null"], shell=True)
 
         # Recreate database from backup's database.sql file
+        output_lines = subprocess.check_output(["echo -e \"CREATE DATABASE " + db_name + ";\nUSE " + \
+            db_name + ";\n$(cat \"" + temp_directory + "/database.sql\")\" > \"" + temp_directory + \
+            "/database.sql\""], shell=True)
         output_lines = subprocess.check_output(["/bin/mysql -u " + db_user + " -p" + db_password + \
             " < " + temp_directory + "/database.sql"], shell=True)
 

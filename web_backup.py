@@ -14,6 +14,7 @@ import calendar
 import boto3
 from util import util
 import pytz
+import glob
 
 # Fake class only for purpose of limiting global namespace to the 'g' object
 class g:
@@ -27,6 +28,7 @@ class g:
     aws_s3_bucket_name = None
     reuse_output_filename = None
     run_util_errors = None
+    website_directory = None
 
 
 def main(argv):
@@ -42,9 +44,10 @@ def main(argv):
         'posted to Amazon AWS S3 bucket (using bucket URL and password in web_backup.ini file)')
     parser.add_argument('--delete-zip', action='store_true', help='If specified, then the created zip file is ' \
         'deleted after posting to S3')
-    parser.add_argument('--website-directory', required=True, help='Files in this directory are recursively ' \
-        'zipped and if website is WordPress, wp-config.php is interogated and database .sql backup file created ' \
-        'and included in ecrypted zip archive which is posted to S3.')
+    parser.add_argument('--website-name', required=False, help='Specified website name is mapped to its ' \
+        'hosting directory under /var/www and its contents are recursively zipped and if website is WordPress, ' \
+        'wp-config.php is interogated and database .sql backup file created and included in ecrypted zip archive ' \
+        'which is posted to S3.  If no --website-name is specified, then all websites on this server are listed')
     parser.add_argument('--retain-temp-directory', action='store_true', help='If specified, the temp directory ' +
         'with output from website directory and WordPress database is not deleted')
     parser.add_argument('--show-backups-to-do', action='store_true', help='If specified, the ONLY thing that is ' +
@@ -65,6 +68,17 @@ def main(argv):
 
     message_level = util.get_ini_setting('logging', 'level')
 
+    util.set_logger(message_level, g.message_output_filename, os.path.basename(__file__))
+
+    websites = get_websites()
+    sys.exit(0)
+
+    if g.args.website_name is None:
+        print 'Listing websites...'
+        sys.exit(0)
+
+    script_directory = os.path.dirname(os.path.realpath(__file__))
+
     g.temp_directory = tempfile.mkdtemp(prefix='web_backup_')
 
     if g.args.message_output_filename is None:
@@ -72,8 +86,6 @@ def main(argv):
             datetime.datetime.now().strftime('%Y%m%d%H%M%S') + '.log'
     else:
         g.message_output_filename = g.args.message_output_filename
-
-    util.set_logger(message_level, g.message_output_filename, os.path.basename(__file__))
 
     # Don't do work that'd just get deleted
     if not g.args.post_to_s3 and g.args.delete_zip:
@@ -138,14 +150,21 @@ def main(argv):
         output_filename = g.temp_directory + '/database.sql'
         dict_db_info = get_wp_database_defines(wp_config_filename,
             ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST'])
-        exec_mysqldump_list = ['/bin/mysqldump', '-h', dict_db_info['DB_HOST'], '-u', dict_db_info['DB_USER'],
-            '-p' + dict_db_info['DB_PASSWORD'], dict_db_info['DB_NAME'], '-r', output_filename]
+        with open(output_filename, 'w') as f:
+            f.write('-- These lines inserted by web_backup.py utility to drop and use correct database for restore\n')
+            f.write('DROP DATABASE IF EXISTS ' + dict_db_info['DB_NAME'] + ';\n')
+            f.write('CREATE DATABASE ' + dict_db_info['DB_NAME'] + ';\n')
+            f.write('USE ' + dict_db_info['DB_NAME'] + ';\n')
+            f.write('\n')
         message_info('Dumping WordPress MySQL database named ' + dict_db_info['DB_NAME'])
-        exit_status = subprocess.call(exec_mysqldump_list, stderr=FNULL)
-        if exit_status == 0:
-            message_info('Successfully dumped MySQL database to ' + output_filename)
-        else:
-            message_warning('Error running mysqldump. Exit status ' + str(exit_status))
+        mysqldump_string = '/bin/mysqldump -h ' + dict_db_info['DB_HOST'] + ' -u ' + dict_db_info['DB_USER'] + \
+            ' -p' + dict_db_info['DB_PASSWORD'] + ' ' + dict_db_info['DB_NAME'] + ' --add-drop-table >> ' + \
+            output_filename
+        try:
+            exec_output = subprocess.check_output(mysqldump_string, stderr=subprocess.STDOUT, shell=True)
+        except subprocess.CalledProcessError as e:
+            print 'mysqldump exited with error status ' + str(e.returncode) + ' and error: ' + e.output
+            exit(1)
 
     # Generate final results output zip filename
     if g.args.output_filename is not None:
@@ -158,17 +177,18 @@ def main(argv):
         os.remove(output_filename)
         message_info('Temp filename used for final results zip output: ' + output_filename)
     else:
-        output_filename = './tmp/web_backup_' + datetime.datetime.now().strftime('%Y%m%d%H%M%S') + '.zip'
+        output_filename = script_directory + '/tmp/web_backup_' + \
+            datetime.datetime.now().strftime('%Y%m%d%H%M%S') + '.zip'
 
     # Zip together results files to create final encrypted zip file
     exec_zip_list = ['/usr/bin/zip', '-P', g.zip_file_password, '-j', '-r', output_filename, g.temp_directory + '/']
     message_info('Zipping results files together')
-    print exec_zip_list
     exit_status = subprocess.call(exec_zip_list, stdout=FNULL)
     if exit_status == 0:
         message_info('Successfully all results to temporary file ' + output_filename)
     else:
-        message_warning('Error running zip. Exit status ' + str(exit_status))
+        message_error('Error running zip. Exit status ' + str(exit_status))
+        sys.exit(1)
 
     # Push ZIP file into appropriate schedule folders (daily, weekly, monthly, etc.) and then delete excess
     # backups in each folder
@@ -177,7 +197,7 @@ def main(argv):
         list_notification_emails = g.args.notification_emails
     else:
         list_notification_emails = None
-    if backups_to_do is not None:
+    if g.args.post_to_s3 and backups_to_do is not None:
         for folder_name in backups_to_do:
             if backups_to_do[folder_name]['do_backup']:
                 s3_key = upload_to_s3(website_name, folder_name, output_filename)
@@ -439,6 +459,112 @@ def run_util(util_name, second_util_name=None):
     else:
         message_warning('Error running ' + util_py + '. Exit status ' + str(exit_status))
         g.run_util_errors.append(util_py)
+
+
+def get_websites():
+    websites = {}
+    default_site = None
+    default_info = get_website_info()
+    if default_info is not None and 'default_site' in default_info:
+        default_site = default_info['default_site']
+    _site_files = glob.glob("/etc/httpd/conf.d/_site_*.conf")
+    for _site_file in _site_files:
+        m = re.match(".*_site_(?P<website_name>.*)\.conf", _site_file)
+        if m is not None:
+            website_name = m.group('website_name')
+            info = get_website_info(website_name)
+            info = augment_wordpress_info(info)
+            info = augment_backup_info(info)
+            if 'server_name' in info and default_site is not None and info['server_name'] == default_site:
+                info['default_site'] = True
+            else:
+                info['default_site'] = False
+            websites[website_name] = info
+    print websites
+
+
+def get_website_info(website_name=None):
+    if website_name is None:
+        fname = '/etc/httpd/conf.d/_site.conf'
+        if not os.path.isfile(fname):
+            return None
+    else:
+        fname = '/etc/httpd/conf.d/_site_' + website_name + '.conf'
+    results = {}
+    results['website_name'] = website_name
+    with open(fname, 'r') as f:
+        line = f.readline()
+        found_vhost = False
+        found_server_name = False
+        results['server_name'] = '<undefined>'
+        found_document_root = False
+        results['document_root'] = '<undefined>'
+        found_default_site = False
+        while line:
+            if not found_vhost:
+                m = re.match('\s*<VirtualHost\s+\*:443>\s*', line)
+                if m is not None:
+                    found_vhost = True
+            else:
+                if re.match('\s*</VirtualHost>\s*', line) is not None:
+                    return results
+                if not found_server_name:
+                    m = re.match('\s*ServerName\s+(?P<server_name>[^\s]+)\s*', line)
+                    if m is not None:
+                        found_server_name = True
+                        results['server_name'] = m.group('server_name')
+                if not found_document_root:
+                    m = re.match('\s*DocumentRoot\s+(?P<document_root>[^\s]+)\s*', line)
+                    if m is not None:
+                        found_document_root = True
+                        results['document_root'] = m.group('document_root')
+                if not found_default_site:
+                    m = re.match('\s*Redirect\s+/\s+https://(?P<default_site>[^/\s]+)/?\s*', line)
+                    if m is not None:
+                        found_default_site = True
+                        results['default_site'] = m.group('default_site')
+            line = f.readline()
+    return results
+
+
+def augment_wordpress_info(site_info):
+    if 'document_root' not in site_info:
+        return site_info
+    wp_config_filename = site_info['document_root'] + '/wp-config.php'
+    if not os.path.isfile(wp_config_filename):
+        return site_info
+    with open(wp_config_filename, 'r') as f:
+        line = f.readline()
+        while line:
+            m = re.match('\s*define\(\s*\'DB_NAME\'*,\s*\'(?P<db_name>[^\']+)\'\s*\);\s*', line)
+            if m is not None:
+                site_info['wordpress_database'] = m.group('db_name')
+            m = re.match('\s*define\(\s*\'DB_USER\'*,\s*\'(?P<db_user>[^\']+)\'\s*\);\s*', line)
+            if m is not None:
+                site_info['wordpress_user'] = m.group('db_user')
+            line = f.readline()
+    return site_info
+
+
+def augment_backup_info(site_info):
+    if 'website_name' not in site_info:
+        return site_info
+    website_name = site_info['website_name']
+    cmd = subprocess.Popen('crontab -l', shell=True, stdout=subprocess.PIPE)
+    for line in cmd.stdout:
+        m = re.match('^(?P<minute>[0-9]+)\s+(?P<hour>[0-9]+)[^-]+--website-name\s+' \
+            '(?P<website_name>[A-Za-z0-9_]+).*(--notification-emails\s+(?P<notification_emails>[A-Za-z0-9_@\.]+))?.*',
+            line)
+        if m is not None:
+            if m.group('website_name') == site_info['website_name']:
+                site_info['backup_hour'] = m.group('hour')
+                site_info['backup_minute'] = m.group('minute')
+                m = re.match('.*--notification-emails\s+(?P<notification_emails>[A-Za-z0-9_@\.]+).*',
+                    line)
+                if m is not None:
+                    site_info['backup_email'] = m.group('notification_emails')
+        
+    return site_info
 
 
 def message_info(s):
