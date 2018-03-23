@@ -17,6 +17,7 @@ from util import util
 # Fake class only for purpose of limiting global namespace to the 'g' object
 class g:
     program_filename = None 
+    websites = None
 
 
 def main(argv):
@@ -25,7 +26,7 @@ def main(argv):
     parser.add_argument('--from-website-backup-file', required=False, help='Input ZIP filename of a website '
         'backup file.')
     parser.add_argument('--from-s3-website-name', required=False, help='Name of website with backup archive in S3.')
-    parser.add_argument('--to-website-name', required=True, help='Name of local website to restore into.')
+    parser.add_argument('--to-website-name', required=False, help='Name of local website to restore into.')
     parser.add_argument('--message-output-filename', required=False, help='Filename of message output file. If ' \
         'unspecified, then messages are written to stderr as well as into the messages_[datetime_stamp].log file ' \
         'that is zipped into the resulting backup file.')
@@ -37,6 +38,11 @@ def main(argv):
         'in the target website directory, they are overwritten')
     parser.add_argument('--overwrite-database', action='store_true', help='If specified, if there is an existing ' \
         'database with same name as that being restored, it is dropped before replacement created in its place')
+    parser.add_argument('--wp-user', required=False, help='If specified, if the restored site is a Wordpress ' \
+                        'site, this is the database user used by Wordpress to access the site\'s database')
+    parser.add_argument('--wp-user-password', required=False, help='If specified, if the restored site is a ' \
+        'Wordpress site, and --wp-user is specified, then this password is used when creating specified wp-user if ' \
+        'that user doesn\'t exist in MySQL')
 
     g.args = parser.parse_args()
 
@@ -46,10 +52,26 @@ def main(argv):
 
     message_level = util.get_ini_setting('logging', 'level')
 
+    g.websites = util.get_websites()
+    if g.args.to_website_name is None or g.args.to_website_name not in g.websites.keys():
+        if g.args.to_website_name is None:
+            print 'NOTE:  --to-website-name of website to restore into was not specified.'
+        else:
+            print 'NOTE:  Specified website \'' + g.args.to_website_name + '\' is not a valid website on this server.'
+        print 'Here\'s a list of websites configured on this server.'
+        print
+        util.print_websites(g.websites)
+        sys.exit(0)
+
+    if g.args.wp_user is None and g.args.wp_user_password is not None:
+        message_error('You cannot specify new wp_user\'s password without specifying the new wp_user to ' \
+            'create with that password.')
+        sys.exit(1)
+
     if g.args.from_website_backup_file is None and g.args.from_s3_website_name is None:
         message_error('Must either specify a local backup ZIP file to restore from or an S3 bucket to grab latest ' \
             'backup from.')
-        util.sys_exit(1)
+        sys.exit(1)
 
     if g.args.from_website_backup_file is None:
 
@@ -148,12 +170,12 @@ def main(argv):
     FNULL = open(os.devnull, 'w')
     exit_status = subprocess.call(exec_zip_list, stdout=FNULL)
 
-    # Does database already exist?
+    # Is there a Wordpress database in the backup for us to restore?
     if os.path.isfile(temp_directory + '/database.sql'):
         db_user = util.get_ini_setting('database', 'user', False)
         db_password = util.get_ini_setting('database', 'password', False)
-        output_lines = subprocess.check_output(["/bin/mysql -u " + db_user + " -p" + db_password + \
-            " -e 'show databases;' 2>/dev/null | /bin/grep wp_"], shell=True)
+        output_lines = subprocess.check_output("/bin/mysql -u " + db_user + " -p" + db_password + \
+            " -e 'show databases;' 2>/dev/null | /bin/grep wp_", shell=True)
         output_lines_list = [elem for elem in output_lines.split("\n") if elem != ""]
         db_name = 'wp_' + g.args.to_website_name
         if db_name in output_lines_list:
@@ -161,20 +183,107 @@ def main(argv):
                 message_error('Database ' + db_name + ' already exists and --overwrite_database was ' \
                     'not specified. Aborting...')
                 sys.exit(1)
-            else:
-                # Drop the database so we can do a clean (re)create
-                message_info('Droping existing database ' + db_name)
-                output_lines = subprocess.check_output(["/bin/mysql -u " + db_user + " -p" + db_password + \
-                    " -e 'DROP DATABASE " + db_name  + ";' 2>/dev/null"], shell=True)
 
         # Recreate database from backup's database.sql file
-        output_lines = subprocess.check_output(["echo -e \"CREATE DATABASE " + db_name + ";\nUSE " + \
-            db_name + ";\n$(cat \"" + temp_directory + "/database.sql\")\" > \"" + temp_directory + \
-            "/database.sql\""], shell=True)
-        output_lines = subprocess.check_output(["/bin/mysql -u " + db_user + " -p" + db_password + \
-            " < " + temp_directory + "/database.sql"], shell=True)
+        wp_user = 'wp_user'
+        wp_user_password = None
+        if g.args.wp_user is not None:
+            wp_user = g.args.wp_user
+        if g.args.wp_user is not None and g.args.wp_user_password is not None:
+            wp_user_password = g.args.wp_user_password
+        wrapper_sql_file = create_wrapper_sql_file(db_name, wp_user, wp_user_password, temp_directory)
+        output_lines = subprocess.check_output("/bin/mysql -u " + db_user + " -p" + db_password + \
+            " < " + temp_directory + "/restore.sql", shell=True)
+
+        # Update wp-config.php file
+        wp_config_filename = website_root + '/' + g.args.to_website_name + '/wp-config.php'
+        if not os.path.isfile(wp_config_filename):
+            message_error('Wordpress config file ' + wp_config_filename + ' does not exist.')
+            sys.exit(1)
+        with open(wp_config_filename, 'r') as f_in:
+            with open(wp_config_filename + 'x', 'w') as f_out:
+                in_line = f_in.readline()
+                skipping_lines = False
+                while in_line:
+                    out_line = None
+                    m = re.match('\s*define\(\s*\'DB_NAME\'*,\s*\'(?P<db_name>[^\']+)\'\s*\);\s*', in_line)
+                    if m is not None:
+                        curr_db_name = m.group('db_name')
+                        new_db_name = 'wp_' + g.args.to_website_name
+                        if curr_db_name != new_db_name:
+                            out_line = 'define(\'DB_NAME\', \'' + new_db_name + '\');\n'
+                    m = re.match('\s*define\(\s*\'DB_USER\'*,\s*\'(?P<db_user>[^\']+)\'\s*\);\s*', in_line)
+                    if m is not None and g.args.wp_user is not None:
+                        curr_db_user = m.group('db_user')
+                        new_db_user = g.args.wp_user
+                        if curr_db_user != new_db_user:
+                            out_line = 'define(\'DB_USER\', \'' + new_db_user + '\');\n'
+                    m = re.match('\s*define\(\s*\'DB_PASSWORD\'*,\s*\'(?P<db_password>[^\']+)\'\s*\);\s*', in_line)
+                    if m is not None and g.args.wp_user is not None and g.args.wp_user_password is not None:
+                        curr_db_password = m.group('db_password')
+                        new_db_password = g.args.wp_user_password
+                        if curr_db_password != new_db_password:
+                            out_line = 'define(\'DB_PASSWORD\', \'' + new_db_password + '\');\n'
+                    m = re.match('\s*define\(\s*\'AUTH_KEY\'*', in_line)
+                    if m is not None:
+                        skipping_lines = True
+                    m = re.match('\s*define\(\s*\'NONCE_SALT\'*', in_line)
+                    if m is not None:
+                        skipping_lines = False
+                        send_new_random_salt(f_out)
+                        in_line = f_in.readline()
+                        next
+                    if not skipping_lines:
+                        if out_line is None:
+                            f_out.write(in_line)
+                        else:
+                            f_out.write(out_line)
+                    in_line = f_in.readline()
+        os.rename(wp_config_filename + 'x', wp_config_filename)
+
+        # Rename Wordpress URL in database
+        output_lines = subprocess.check_output('mysql -u ' + db_user + ' -p' + db_password + \
+            ' -e "use wp_' + g.args.to_website_name + ';select option_value from wp_options ' \
+            'where option_name = \'siteurl\';"', shell=True)
+        output_lines_list = [elem for elem in output_lines.split("\n") if elem != ""]
+        current_full_domain = None
+        for line in output_lines_list:
+            m = re.match('[\s\|]*https://(?P<full_domain>[a-z0-9\.]+)[\s\|]*', line)
+            if m is not None:
+                current_full_domain = m.group('full_domain')
+        if current_full_domain is not None:
+            new_full_domain = g.websites[g.args.to_website_name]['server_name']
+            message_info('Renaming from https://' + current_full_domain + ' to https://' + new_full_domain + \
+                ' in Wordpress database')
+            output_lines = subprocess.check_output('/usr/local/bin/wp --path=/var/www/' + g.args.to_website_name + \
+                ' search-replace "https://' + current_full_domain + '" "https://' + new_full_domain + '" ' \
+                '--skip-columns=guid', shell=True)
+
+    print 'Done!'
 
     sys.exit(0)
+
+
+def send_new_random_salt(output_file):
+    output_lines = subprocess.check_output('/bin/curl https://api.wordpress.org/secret-key/1.1/salt/', shell=True)
+    output_lines_list = [elem for elem in output_lines.split("\n") if elem != ""]
+    for line in output_lines_list:
+        output_file.write(line + '\n')
+
+
+def create_wrapper_sql_file(db_name, wp_user, wp_user_password, temp_directory):
+    wrapper_sql_filename = temp_directory + '/restore.sql'
+    with open(wrapper_sql_filename, 'w') as f_out:
+        f_out.write('DROP DATABASE IF EXISTS ' + db_name + ';\n')
+        f_out.write('CREATE DATABASE ' + db_name + ';\n')
+        if wp_user is not None and wp_user_password is not None:
+            f_out.write('CREATE USER IF NOT EXISTS \'' + wp_user + '\'@\'localhost\' IDENTIFIED BY \'' + \
+                wp_user_password + '\';\n')
+        if wp_user is not None:
+            f_out.write('GRANT ALL ON ' + db_name + '.* TO \'' + wp_user + '\'@\'localhost\';\n')
+        f_out.write('USE ' + db_name + ';\n')
+        f_out.write('source ' + temp_directory + '/database.sql;\n')
+    return wrapper_sql_filename
 
 
 def message(str):

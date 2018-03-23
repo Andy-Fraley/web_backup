@@ -29,6 +29,7 @@ class g:
     reuse_output_filename = None
     run_util_errors = None
     website_directory = None
+    websites = None
 
 
 def main(argv):
@@ -70,12 +71,18 @@ def main(argv):
 
     util.set_logger(message_level, g.message_output_filename, os.path.basename(__file__))
 
-    websites = get_websites()
-    sys.exit(0)
-
-    if g.args.website_name is None:
-        print 'Listing websites...'
+    g.websites = util.get_websites()
+    if g.args.website_name is None or g.args.website_name not in g.websites.keys():
+        if g.args.website_name is None:
+            print 'NOTE:  --website-name of website to backup was not specified.'
+        else:
+            print 'NOTE:  Specified website \'' + g.args.website_name + '\' is not a valid website on this server.'
+        print 'Here\'s a list of websites configured on this server.'
+        print
+        util.print_websites(g.websites)
         sys.exit(0)
+
+    g.website_directory = g.websites[g.args.website_name]['document_root']
 
     script_directory = os.path.dirname(os.path.realpath(__file__))
 
@@ -107,7 +114,7 @@ def main(argv):
         g.zip_file_password = util.get_ini_setting('zip_file', 'password', False)
 
     # Call the base directory the name of the website
-    website_name = os.path.basename(g.args.website_directory)
+    website_name = os.path.basename(g.website_directory)
 
     # Start with assumption no backups to do
     backups_to_do = None
@@ -134,7 +141,7 @@ def main(argv):
 
     # Create ZIP file of website files
     output_filename = g.temp_directory + '/files.zip'
-    os.chdir(g.args.website_directory)
+    os.chdir(g.website_directory)
     exec_zip_list = ['/usr/bin/zip', '-r', output_filename, '.']
     message_info('Zipping website files directory')
     FNULL = open(os.devnull, 'w')
@@ -145,20 +152,14 @@ def main(argv):
         message_warning('Error running zip. Exit status ' + str(exit_status))
 
     # Create .sql dump file from website's WordPress database (if applicable)
-    wp_config_filename = g.args.website_directory + '/wp-config.php'
+    wp_config_filename = g.website_directory + '/wp-config.php'
     if os.path.isfile(wp_config_filename):
         output_filename = g.temp_directory + '/database.sql'
         dict_db_info = get_wp_database_defines(wp_config_filename,
             ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST'])
-        with open(output_filename, 'w') as f:
-            f.write('-- These lines inserted by web_backup.py utility to drop and use correct database for restore\n')
-            f.write('DROP DATABASE IF EXISTS ' + dict_db_info['DB_NAME'] + ';\n')
-            f.write('CREATE DATABASE ' + dict_db_info['DB_NAME'] + ';\n')
-            f.write('USE ' + dict_db_info['DB_NAME'] + ';\n')
-            f.write('\n')
         message_info('Dumping WordPress MySQL database named ' + dict_db_info['DB_NAME'])
         mysqldump_string = '/bin/mysqldump -h ' + dict_db_info['DB_HOST'] + ' -u ' + dict_db_info['DB_USER'] + \
-            ' -p' + dict_db_info['DB_PASSWORD'] + ' ' + dict_db_info['DB_NAME'] + ' --add-drop-table >> ' + \
+            ' -p' + dict_db_info['DB_PASSWORD'] + ' ' + dict_db_info['DB_NAME'] + ' --add-drop-table -r ' + \
             output_filename
         try:
             exec_output = subprocess.check_output(mysqldump_string, stderr=subprocess.STDOUT, shell=True)
@@ -480,7 +481,7 @@ def get_websites():
             else:
                 info['default_site'] = False
             websites[website_name] = info
-    print websites
+    return websites
 
 
 def get_website_info(website_name=None):
@@ -565,6 +566,46 @@ def augment_backup_info(site_info):
                     site_info['backup_email'] = m.group('notification_emails')
         
     return site_info
+
+
+def print_websites(websites):
+    print_blank = False
+    keys = websites.keys()
+    keys.sort()
+    for website_name in keys:
+        if print_blank:
+            print
+        else:
+            print_blank = True
+
+        print 'Website: ' + website_name
+
+        if 'document_root' in websites[website_name]:
+            print '    Directory: ' + websites[website_name]['document_root']
+
+        if 'default_site' in websites[website_name]:
+            print '    This is default site on server: ' + str(websites[website_name]['default_site'])
+
+        if 'backup_hour' in websites[website_name]:
+            if 'backup_email' in websites[website_name]:
+                backup_email = ' (will notify ' + websites[website_name]['backup_email'] + ')'
+            else:
+                backup_email = ''
+            print '    Backups for this site are configured for ' + str(websites[website_name]['backup_hour']) + \
+                ':' + str(websites[website_name]['backup_minute']).zfill(2) + backup_email
+        else:
+            print '    There are no backups configured (via crontab) for this site.'
+
+        if 'wordpress_database' in websites[website_name]:
+            if 'wordpress_user' in websites[website_name]:
+                wordpress_user = ' (accessed as database user \'' + websites[website_name]['wordpress_user'] + '\')'
+            else:
+                wordpress_user = ''
+            print '    This is a Wordpress site stored in database \'' +\
+                websites[website_name]['wordpress_database'] + '\'' + wordpress_user
+
+        else:
+            print '    This is a static site.  (Not a Wordpress site.)'
 
 
 def message_info(s):
