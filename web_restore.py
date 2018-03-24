@@ -259,6 +259,17 @@ def main(argv):
                 ' search-replace "https://' + current_full_domain + '" "https://' + new_full_domain + '" ' \
                 '--skip-columns=guid', shell=True)
 
+    # If this is a Wordpress site, update and (re)secure Wordpress after a restore
+    if 'wordpress_database' in g.websites[g.args.website.name]:
+        message_info('Updating and (re)securing Wordpress')
+        try:
+            exec_output = subprocess.check_output('/root/bin/update_and_secure_wp ' + g.website_directory,
+                stderr=subprocess.STDOUT, shell=True)
+        except subprocess.CalledProcessError as e:
+            print '/root/bin/update_and_secure_wp utility exited with error status ' + str(e.returncode) + \
+                ' and error: ' + e.output
+            sys.exit(1)
+
     print 'Done!'
 
     sys.exit(0)

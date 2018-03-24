@@ -45,6 +45,9 @@ def main(argv):
         'posted to Amazon AWS S3 bucket (using bucket URL and password in web_backup.ini file)')
     parser.add_argument('--delete-zip', action='store_true', help='If specified, then the created zip file is ' \
         'deleted after posting to S3')
+    parser.add_argument('--update-and-secure-wp', action='store_true', help='If specified, then ' \
+        '/root/bin/update_and_secure_wp utility is run to upgrade Wordpress and plugins and redo security flags '\
+        'after backup is completed')
     parser.add_argument('--website-name', required=False, help='Specified website name is mapped to its ' \
         'hosting directory under /var/www and its contents are recursively zipped and if website is WordPress, ' \
         'wp-config.php is interogated and database .sql backup file created and included in ecrypted zip archive ' \
@@ -80,7 +83,7 @@ def main(argv):
         print 'Here\'s a list of websites configured on this server.'
         print
         util.print_websites(g.websites)
-        sys.exit(0)
+        util.sys_exit(0)
 
     g.website_directory = g.websites[g.args.website_name]['document_root']
 
@@ -165,7 +168,7 @@ def main(argv):
             exec_output = subprocess.check_output(mysqldump_string, stderr=subprocess.STDOUT, shell=True)
         except subprocess.CalledProcessError as e:
             print 'mysqldump exited with error status ' + str(e.returncode) + ' and error: ' + e.output
-            exit(1)
+            util.sys_exit(1)
 
     # Generate final results output zip filename
     if g.args.output_filename is not None:
@@ -189,7 +192,7 @@ def main(argv):
         message_info('Successfully all results to temporary file ' + output_filename)
     else:
         message_error('Error running zip. Exit status ' + str(exit_status))
-        sys.exit(1)
+        util.sys_exit(1)
 
     # Push ZIP file into appropriate schedule folders (daily, weekly, monthly, etc.) and then delete excess
     # backups in each folder
@@ -222,6 +225,17 @@ def main(argv):
     if g.args.delete_zip:
         os.remove(output_filename)
         message_info('Output final results zip file deleted')
+
+    # If its a Wordpress site and user requested, after backup is complete, run /root/bin/update_and_secure_wp utility
+    if 'wordpress_database' in g.websites[g.args.website.name] and g.args.update_and_secure_wp:
+        message_info('Updating and (re)securing Wordpress after backup as requested')
+        try:
+            exec_output = subprocess.check_output('/root/bin/update_and_secure_wp ' + g.website_directory,
+                stderr=subprocess.STDOUT, shell=True)
+        except subprocess.CalledProcessError as e:
+            print '/root/bin/update_and_secure_wp utility exited with error status ' + str(e.returncode) + \
+                ' and error: ' + e.output
+            util.sys_exit(1)
 
     util.sys_exit(0)
 
