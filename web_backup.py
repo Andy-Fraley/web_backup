@@ -227,7 +227,7 @@ def main(argv):
         message_info('Output final results zip file deleted')
 
     # If its a Wordpress site and user requested, after backup is complete, run /root/bin/update_and_secure_wp utility
-    if 'wordpress_database' in g.websites[g.args.website.name] and g.args.update_and_secure_wp:
+    if 'wordpress_database' in g.websites[g.args.website_name] and g.args.update_and_secure_wp:
         message_info('Updating and (re)securing Wordpress after backup as requested')
         try:
             exec_output = subprocess.check_output('/root/bin/update_and_secure_wp ' + g.website_directory,
