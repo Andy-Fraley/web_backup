@@ -145,7 +145,12 @@ def main(argv):
     # Create ZIP file of website files
     output_filename = g.temp_directory + '/files.zip'
     os.chdir(g.website_directory)
+    web_files = os.listdir(g.website_directory)
+    if len(web_files) == 0:
+        message_info('No files in directory ' + g.website_diretory + '. Nothing to back up. Aborting.')
+        util.sys_exit(1)
     exec_zip_list = ['/usr/bin/zip', '-r', output_filename, '.']
+    print exec_zip_list
     message_info('Zipping website files directory')
     FNULL = open(os.devnull, 'w')
     exit_status = subprocess.call(exec_zip_list, stdout=FNULL)
@@ -186,10 +191,11 @@ def main(argv):
 
     # Zip together results files to create final encrypted zip file
     exec_zip_list = ['/usr/bin/zip', '-P', g.zip_file_password, '-j', '-r', output_filename, g.temp_directory + '/']
+    print exec_zip_list
     message_info('Zipping results files together')
     exit_status = subprocess.call(exec_zip_list, stdout=FNULL)
     if exit_status == 0:
-        message_info('Successfully all results to temporary file ' + output_filename)
+        message_info('Successfully zipped all results to temporary file ' + output_filename)
     else:
         message_error('Error running zip. Exit status ' + str(exit_status))
         util.sys_exit(1)
@@ -236,6 +242,8 @@ def main(argv):
             print '/root/bin/update_and_secure_wp utility exited with error status ' + str(e.returncode) + \
                 ' and error: ' + e.output
             util.sys_exit(1)
+
+    message_info('Done!')
 
     util.sys_exit(0)
 
