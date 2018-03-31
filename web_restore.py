@@ -18,6 +18,7 @@ from util import util
 class g:
     program_filename = None 
     websites = None
+    message_output_filename = None
 
 
 def main(argv):
@@ -51,6 +52,11 @@ def main(argv):
         g.program_filename = g.program_filename[:-3]
 
     message_level = util.get_ini_setting('logging', 'level')
+
+    if g.args.message_output_filename is not None:
+        g.message_output_filename = g.args.message_output_filename
+
+    util.set_logger(message_level, g.message_output_filename, os.path.basename(__file__))
 
     g.websites = util.get_websites()
     if g.args.to_website_name is None or g.args.to_website_name not in g.websites.keys():
@@ -307,17 +313,17 @@ def message(str):
 
 def message_info(s):
     logging.info(s)
-    output_message(s, 'INFO')
+#    output_message(s, 'INFO')
 
 
 def message_warning(s):
     logging.warning(s)
-    output_message(s, 'WARNING')
+#    output_message(s, 'WARNING')
 
 
 def message_error(s):
     logging.error(s)
-    output_message(s, 'ERROR')
+#    output_message(s, 'ERROR')
 
 
 def output_message(s, level):

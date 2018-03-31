@@ -27,7 +27,6 @@ class g:
     aws_region_name = None
     aws_s3_bucket_name = None
     reuse_output_filename = None
-    run_util_errors = None
     website_directory = None
     websites = None
 
@@ -147,7 +146,7 @@ def main(argv):
     os.chdir(g.website_directory)
     web_files = os.listdir(g.website_directory)
     if len(web_files) == 0:
-        message_info('No files in directory ' + g.website_diretory + '. Nothing to back up. Aborting.')
+        message_info('No files in directory ' + g.website_directory + '. Nothing to back up. Aborting.')
         util.sys_exit(1)
     exec_zip_list = ['/usr/bin/zip', '-r', output_filename, '.']
     message_info('Zipping website files directory')
@@ -306,10 +305,6 @@ def send_email_notification(list_completed_backups, list_notification_emails):
         body = body + sep + 'Completed ' + folder_name + ' backup which is accessible at ' + url + ' for ' + \
             str(expiry_days) + ' days.'
         sep = '\r\n\r\n'
-    if g.run_util_errors is not None and len(g.run_util_errors) > 0:
-        body = body + sep + 'There were errors running the following utility(s): ' + ', '.join(g.run_util_errors) + \
-            '. See messages_xxx.log in backup zip file for details.'
-        backup_completed_str = backup_completed_str + ' with errors'
     body += '\r\n\r\nSent from local IP address ' + util.get_ip_address()
     util.send_email(list_notification_emails, backup_completed_str, body)
 
@@ -348,9 +343,9 @@ def get_backups_to_do(website_name):
                         message_info('Unrecognized file in backup folder...ignoring: ' + file_item.key)
                 else:
                     message_info('Unrecognized folder or file in web_backups S3 bucket...ignoring: ' + file_item.key)
-            else:
-                message_info('Non-matching folder or file in web_backups S3 bucket with long path...ignoring: ' +
-                    file_item.key)
+            # else:
+            #     message_info('Non-matching folder or file in web_backups S3 bucket with long path...ignoring: ' +
+            #         file_item.key)
         else:
             message_info('Found folder that is not part of this website backup area: ' +
                 file_item.key)
@@ -450,51 +445,19 @@ def now_minus_delta_time(delta_time_string):
             datetime.timedelta(seconds=slop)
 
 
-def run_util(util_name, second_util_name=None):
-    global g
-
-    if util_name == 'attendance' and g.args.all_time:
-        all_time_list = [ '--all-time' ]
-    else:
-        all_time_list = []
-
-    datetime_stamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-    util_py = 'get_' + util_name + '.py'
-    fullpath_util_py = os.path.dirname(os.path.realpath(__file__)) + '/' + util_py
-    if second_util_name is not None:
-        output_filename1 = g.temp_directory + '/' + util_name + '_' + datetime_stamp + '.csv'
-        output_filename2 = g.temp_directory + '/' + second_util_name + '_' + datetime_stamp + '.csv'
-        outputs_list = ['--output-' + util_name + '-filename', output_filename1,
-            '--output-' + second_util_name + '-filename', output_filename2]
-        message_info('Running ' + util_py + ' with output files ' + output_filename1 + ' and ' + \
-            output_filename2)
-    else:
-        output_filename = g.temp_directory + '/' + util_name + '_' + datetime_stamp + '.csv'
-        outputs_list = ['--output-filename', output_filename]
-        message_info('Running ' + util_py + ' with output file ' + output_filename)
-    exec_list = [fullpath_util_py] + all_time_list + ['--message-output-filename', g.message_output_filename] + \
-        outputs_list
-    exit_status = subprocess.call(exec_list)
-    if exit_status == 0:
-        message_info('Successfully ran ' + util_py)
-    else:
-        message_warning('Error running ' + util_py + '. Exit status ' + str(exit_status))
-        g.run_util_errors.append(util_py)
-
-
 def message_info(s):
     logging.info(s)
-    output_message(s, 'INFO')
+#    output_message(s, 'INFO')
 
 
 def message_warning(s):
     logging.warning(s)
-    output_message(s, 'WARNING')
+#    output_message(s, 'WARNING')
 
 
 def message_error(s):
     logging.error(s)
-    output_message(s, 'ERROR')
+#    output_message(s, 'ERROR')
 
 
 def output_message(s, level):
