@@ -150,7 +150,6 @@ def main(argv):
         message_info('No files in directory ' + g.website_diretory + '. Nothing to back up. Aborting.')
         util.sys_exit(1)
     exec_zip_list = ['/usr/bin/zip', '-r', output_filename, '.']
-    print exec_zip_list
     message_info('Zipping website files directory')
     FNULL = open(os.devnull, 'w')
     exit_status = subprocess.call(exec_zip_list, stdout=FNULL)
@@ -191,7 +190,6 @@ def main(argv):
 
     # Zip together results files to create final encrypted zip file
     exec_zip_list = ['/usr/bin/zip', '-P', g.zip_file_password, '-j', '-r', output_filename, g.temp_directory + '/']
-    print exec_zip_list
     message_info('Zipping results files together')
     exit_status = subprocess.call(exec_zip_list, stdout=FNULL)
     if exit_status == 0:
