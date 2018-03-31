@@ -313,23 +313,24 @@ def message(str):
 
 def message_info(s):
     logging.info(s)
-#    output_message(s, 'INFO')
+    output_message(s, 'INFO')
 
 
 def message_warning(s):
     logging.warning(s)
-#    output_message(s, 'WARNING')
+    output_message(s, 'WARNING')
 
 
 def message_error(s):
     logging.error(s)
-#    output_message(s, 'ERROR')
+    output_message(s, 'ERROR')
 
 
 def output_message(s, level):
     global g
 
-    if g.args.message_output_filename is None:
+    # Only echo to stderr if logger is logging to file (and not stderr)
+    if g.args.message_output_filename is not None:
         datetime_stamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print >> sys.stderr, datetime_stamp + ':' + g.program_filename + ':' + level + ':' + s
 

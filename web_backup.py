@@ -71,6 +71,16 @@ def main(argv):
 
     message_level = util.get_ini_setting('logging', 'level')
 
+    script_directory = os.path.dirname(os.path.realpath(__file__))
+
+    g.temp_directory = tempfile.mkdtemp(prefix='web_backup_')
+
+    if g.args.message_output_filename is None:
+        g.message_output_filename = g.temp_directory + '/messages_' + \
+            datetime.datetime.now().strftime('%Y%m%d%H%M%S') + '.log'
+    else:
+        g.message_output_filename = g.args.message_output_filename
+
     util.set_logger(message_level, g.message_output_filename, os.path.basename(__file__))
 
     g.websites = util.get_websites()
@@ -85,16 +95,6 @@ def main(argv):
         util.sys_exit(0)
 
     g.website_directory = g.websites[g.args.website_name]['document_root']
-
-    script_directory = os.path.dirname(os.path.realpath(__file__))
-
-    g.temp_directory = tempfile.mkdtemp(prefix='web_backup_')
-
-    if g.args.message_output_filename is None:
-        g.message_output_filename = g.temp_directory + '/messages_' + \
-            datetime.datetime.now().strftime('%Y%m%d%H%M%S') + '.log'
-    else:
-        g.message_output_filename = g.args.message_output_filename
 
     # Don't do work that'd just get deleted
     if not g.args.post_to_s3 and g.args.delete_zip:
@@ -447,23 +447,23 @@ def now_minus_delta_time(delta_time_string):
 
 def message_info(s):
     logging.info(s)
-#    output_message(s, 'INFO')
+    output_message(s, 'INFO')
 
 
 def message_warning(s):
     logging.warning(s)
-#    output_message(s, 'WARNING')
+    output_message(s, 'WARNING')
 
 
 def message_error(s):
     logging.error(s)
-#    output_message(s, 'ERROR')
+    output_message(s, 'ERROR')
 
 
 def output_message(s, level):
     global g
 
-    if g.args.message_output_filename is None:
+    if g.message_output_filename is not None:
         datetime_stamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print >> sys.stderr, datetime_stamp + ':' + g.program_filename + ':' + level + ':' + s
 
