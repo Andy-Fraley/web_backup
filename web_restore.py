@@ -143,7 +143,6 @@ def main(argv):
         zip_file_password = util.get_ini_setting('zip_file', 'password', False)
 
     temp_directory = tempfile.mkdtemp(prefix='web_restore_')
-    print 'temp_directory is ' + temp_directory
     exec_zip_list = ['/usr/bin/unzip', '-P', zip_file_password, backup_zip_filename, '-d', temp_directory]
     message_info('Unzipping backup file container into ' + temp_directory)
     FNULL = open(os.devnull, 'w')
@@ -257,24 +256,30 @@ def main(argv):
             m = re.match('[\s\|]*https://(?P<full_domain>[a-z0-9\.]+)[\s\|]*', line)
             if m is not None:
                 current_full_domain = m.group('full_domain')
-        if current_full_domain is not None:
-            new_full_domain = g.websites[g.args.to_website_name]['server_name']
+        new_full_domain = g.websites[g.args.to_website_name]['server_name']
+        if current_full_domain is not None and current_full_domain != new_full_domain:
             message_info('Renaming from https://' + current_full_domain + ' to https://' + new_full_domain + \
                 ' in Wordpress database')
             output_lines = subprocess.check_output('/usr/local/bin/wp --path=/var/www/' + g.args.to_website_name + \
                 ' search-replace "https://' + current_full_domain + '" "https://' + new_full_domain + '" ' \
                 '--skip-columns=guid', shell=True)
+        else:
+            message_info('No need to rename from https://' + current_full_domain + ' to https://' + \
+                new_full_domain + ' in Wordpress database...skipping')
 
-    # If this is a Wordpress site, update and (re)secure Wordpress after a restore
-    if 'wordpress_database' in g.websites[g.args.website.name]:
+        # Update and (re)secure Wordpress after a restore
         message_info('Updating and (re)securing Wordpress')
         try:
-            exec_output = subprocess.check_output('/root/bin/update_and_secure_wp ' + g.website_directory,
+            exec_output = subprocess.check_output('/root/bin/update_and_secure_wp ' + website_dir,
                 stderr=subprocess.STDOUT, shell=True)
         except subprocess.CalledProcessError as e:
             print '/root/bin/update_and_secure_wp utility exited with error status ' + str(e.returncode) + \
                 ' and error: ' + e.output
             sys.exit(1)
+
+    # Cleanup
+    shutil.rmtree(temp_directory)
+    message_info('Temporary output directory deleted')
 
     print 'Done!'
 
