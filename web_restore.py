@@ -283,7 +283,8 @@ def main(argv):
 
     print 'NOTE: If you web_restore\'d a WordPress installation with WordFence installed, you may need to hand edit'
     print '      .htaccess to modify auto_prepend_file to point at proper wordfence-waf.php in restored'
-    print '      installation.'
+    print '      installation. Also, interfacing with services like Cloudflare, Google Maps, Google Analytics,'
+    print '      NewRelic, Pingdom, etc., may need to be (re)configured to properly support this site.'
     print
     print 'Done!'
 
