@@ -281,6 +281,10 @@ def main(argv):
     shutil.rmtree(temp_directory)
     message_info('Temporary output directory deleted')
 
+    print 'NOTE: If you web_restore\'d a WordPress installation with WordFence installed, you may need to hand edit'
+    print '      .htaccess to modify auto_prepend_file to point at proper wordfence-waf.php in restored'
+    print '      installation.'
+    print
     print 'Done!'
 
     sys.exit(0)
