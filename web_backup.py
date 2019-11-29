@@ -184,7 +184,7 @@ def main(argv):
         os.remove(output_filename)
         message_info('Temp filename used for final results zip output: ' + output_filename)
     else:
-        output_filename = script_directory + '/tmp/web_backup_' + \
+        output_filename = script_directory + '/tmp/' + website_name + '_' + \
             datetime.datetime.now().strftime('%Y%m%d%H%M%S') + '.zip'
 
     # Zip together results files to create final encrypted zip file
